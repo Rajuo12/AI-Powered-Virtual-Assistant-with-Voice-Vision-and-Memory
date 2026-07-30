@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Memory
+memory/
+
+# Environment Variables
+.env
+.env.*
+
+# Build
+dist/
+build/
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Ollama Models
+*.gguf
