@@ -26,7 +26,7 @@ from pathlib import Path
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 API_PORT   = 8000
-MODEL      = "phi3:mini"   # fast — change to qwen2.5:7b for harder tasks
+MODEL      = "qwen2.5:7b"   # using installed qwen2.5:7b model
 
 SYSTEM_PROMPT = """You are Nano, a powerful AI desktop assistant running on Windows.
 You can run real terminal commands, write code, open apps, search the web,
@@ -89,24 +89,23 @@ class NanoAgent:
             print("  Type your command (Ctrl+C to quit)\n")
             self._text_loop()
         else:
-
-        try:
-            from stt.vad import VADDetector
-            self.vad = VADDetector(
-                on_speech_start=lambda: None,
-                on_speech_end=self._on_audio,
-                sensitivity=0.4,
-            )
-            self._set_state("listening")
-            threading.Thread(target=self.vad.start, daemon=True).start()
-            threading.Thread(target=self._transcription_loop, daemon=True).start()
-            print("  Speak to Nano!\n")
-            while True:
-                time.sleep(1)
-        except Exception as e:
-            print(f"  Mic error: {e} — switching to text mode")
-            self._text_loop()
-            return
+            try:
+                from stt.vad import VADDetector
+                self.vad = VADDetector(
+                    on_speech_start=lambda: None,
+                    on_speech_end=self._on_audio,
+                    sensitivity=0.4,
+                )
+                self._set_state("listening")
+                threading.Thread(target=self.vad.start, daemon=True).start()
+                threading.Thread(target=self._transcription_loop, daemon=True).start()
+                print("  Speak to Nano!\n")
+                while True:
+                    time.sleep(1)
+            except Exception as e:
+                print(f"  Mic error: {e} — switching to text mode")
+                self._text_loop()
+                return
 
     # ── Audio pipeline ────────────────────────────────────────────────────────
 
@@ -374,9 +373,16 @@ class NanoAgent:
                       "options": {"temperature": 0.7, "num_predict": 200, "num_ctx": 2048}},
                 timeout=45.0,
             )
-            return resp.json()["message"]["content"].strip()
+            data = resp.json()
+            if "message" in data and "content" in data["message"]:
+                return data["message"]["content"].strip()
+            elif "error" in data:
+                return f"Ollama error: {data['error']}"
+            elif "response" in data:
+                return data["response"].strip()
+            return f"Ollama response invalid format: {data}"
         except Exception as e:
-            return f"Ollama error: {e}. Make sure Ollama is running: ollama serve"
+            return f"Ollama connection error: {e}. Make sure Ollama is running (ollama serve)"
 
     # ── TTS / Avatar ──────────────────────────────────────────────────────────
 
@@ -470,7 +476,7 @@ class NanoAgent:
 
         uvicorn.run(api, host="0.0.0.0", port=API_PORT,
                     log_level="warning", ws_ping_interval=30,
-                    ws_ping_timeout=60, out_keep_alive=65, )
+                    ws_ping_timeout=60, timeout_keep_alive=65)
 
     def _broadcast(self, msg: dict):
         dead = set()

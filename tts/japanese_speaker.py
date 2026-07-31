@@ -63,12 +63,14 @@ class JapaneseTTSSpeaker:
                         buffer += chunk["data"]
                 return buffer
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
-                raw_mp3 = loop.run_until_complete(stream_audio())
-            finally:
-                loop.close()
+                raw_mp3 = asyncio.run(stream_audio())
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                try:
+                    raw_mp3 = loop.run_until_complete(stream_audio())
+                finally:
+                    loop.close()
 
             if not raw_mp3:
                 return None, 0
