@@ -44,7 +44,23 @@ class NanoAgent:
         self.audio_queue = Queue()
         self.avatar      = None
         self._ws_clients = set()
+
+        from tools.app_tool import AppTool
+        from tools.file_tool import FileTool
+        from tools.cmd_tool import CMDTool
+        from tools.search_tool import WebSearchTool
+        from tools.memory_tool import MemoryTool
+        from tools.code_tool import CodeTool
+
+        self.app_tool    = AppTool()
+        self.file_tool   = FileTool()
+        self.cmd_tool    = CMDTool()
+        self.search_tool = WebSearchTool()
+        self.memory_tool = MemoryTool()
+        self.code_tool   = CodeTool()
+
         self._banner()
+
 
     # ── Start ─────────────────────────────────────────────────────────────────
 
@@ -182,121 +198,51 @@ class NanoAgent:
     # ── MCP Tool calling ──────────────────────────────────────────────────────
 
     async def _call_tool(self, text: str) -> str:
-        """Detect intent and call the right MCP tool directly."""
+        """Detect intent and call the right Python tool directly."""
         tl = text.lower().strip()
 
-        # Add server.py directory to path so we can import it directly
-        server_dir = os.path.dirname(os.path.abspath(__file__))
-        if server_dir not in sys.path:
-            sys.path.insert(0, server_dir)
+        # 1. Time / Date
+        if any(w in tl for w in ["what time", "current time", "what's the time", "date today", "what day", "what date"]):
+            import datetime
+            return f"Current time: {datetime.datetime.now().strftime('%I:%M %p, %B %d, %Y')}"
 
-        try:
-            import server as tools
+        # 2. Memory tool (remember, recall, forget)
+        if any(w in tl for w in ["remember", "note that", "keep in mind", "don't forget", "what do you know", "what do you remember", "recall", "forget everything", "clear memory"]):
+            res = self.memory_tool.run(text)
+            if res:
+                return res
 
-            # ── Time ──────────────────────────────────────────────────────
-            if any(w in tl for w in ["what time","current time","what's the time",
-                                      "date today","what day","what date"]):
-                return tools.get_current_time()
+        # 3. File tool (create folder, create file, read file, open folder/desktop/downloads)
+        if any(w in tl for w in ["create folder", "make folder", "new folder", "mkdir", "create file", "new file", "make file", "open folder", "open file", "open desktop", "open downloads", "open documents", "read file", "show file", "contents of"]):
+            res = self.file_tool.run(text)
+            if res:
+                return res
 
-            # ── Battery ───────────────────────────────────────────────────
-            if "battery" in tl:
-                return tools.get_battery_status()
+        # 4. App tool (open, launch, start, close, kill app)
+        if any(w in tl for w in ["open ", "launch ", "start ", "close ", "kill ", "quit "]):
+            res = self.app_tool.run(text)
+            if res:
+                return res
 
-            # ── System info ───────────────────────────────────────────────
-            if any(w in tl for w in ["system info","cpu usage","ram usage","memory usage",
-                                      "disk space","uptime","how much ram","check cpu"]):
-                return tools.get_system_info()
+        # 5. Web Search tool
+        if any(w in tl for w in ["search for", "look up", "find info", "latest news on", "google "]):
+            res = self.search_tool.run(text)
+            if res:
+                return res
 
-            # ── CMD / run command ─────────────────────────────────────────
-            cmd = self._extract_cmd(tl, text)
-            if cmd:
-                return tools.run_command(cmd)
+        # 6. Code tool
+        if any(w in tl for w in ["write code", "write a python", "write python", "build a website", "create a python script", "make a python script"]):
+            res = self.code_tool.run(text)
+            if res:
+                return res
 
-            # ── Open app ──────────────────────────────────────────────────
-            if re.search(r"\b(open|launch|start)\b", tl):
-                app = self._extract_app(tl)
-                if app:
-                    return tools.open_application(app)
-
-            # ── Play music ────────────────────────────────────────────────
-            if re.search(r"\bplay\b", tl):
-                q = re.sub(r"\b(play|on youtube|on spotify|song|music|track)\b", "", tl).strip()
-                if q:
-                    return tools.play_on_youtube(q)
-
-            # ── Web search ────────────────────────────────────────────────
-            SEARCH_WORDS = ["search","look up","find","what is","who is",
-                            "news about","latest","tell me about","google"]
-            if any(w in tl for w in SEARCH_WORDS):
-                q = re.sub(r"\b(search for|look up|find|what is|who is|"
-                           r"news about|latest news on|tell me about|google)\b",
-                           "", tl).strip()
-                return tools.search_web(q or text)
-
-            # ── Get news ──────────────────────────────────────────────────
-            if "news" in tl and not any(w in tl for w in ["news about","latest news"]):
-                topic = re.sub(r"\b(news|latest|today|current)\b", "", tl).strip()
-                return tools.get_news(topic or "technology")
-
-            # ── Open URL ──────────────────────────────────────────────────
-            m = re.search(r"(https?://\S+)", text)
-            if m:
-                return tools.open_url(m.group(1))
-
-            # ── Create folder ─────────────────────────────────────────────
-            m = re.search(r"create\s+(?:a\s+)?folder\s+(?:called|named)?\s*['\"]?([^'\"]+?)['\"]?\s*(?:on|in|at|$)", tl)
-            if m:
-                loc = ("documents" if "documents" in tl
-                       else "downloads" if "downloads" in tl else "desktop")
-                return tools.create_folder(m.group(1).strip(), loc)
-
-            # ── Create file ───────────────────────────────────────────────
-            m = re.search(r"create\s+(?:a\s+)?file\s+(?:called|named)?\s*['\"]?([^'\"]+?)['\"]?", tl)
-            if m:
-                return tools.create_file(m.group(1).strip())
-
-            # ── Read file ─────────────────────────────────────────────────
-            m = re.search(r"read\s+(?:file\s+|the\s+file\s+)?['\"]?([^'\"]+\.\w+)['\"]?", tl)
-            if m:
-                return tools.read_file(m.group(1).strip())
-
-            # ── List files ────────────────────────────────────────────────
-            if any(w in tl for w in ["list files","show files","what files",
-                                      "what's in","what is in my","contents of"]):
-                loc = ("downloads" if "downloads" in tl
-                       else "documents" if "documents" in tl else "desktop")
-                return tools.list_files(loc)
-
-            # ── Remember ──────────────────────────────────────────────────
-            if re.match(r"(remember|note that|don't forget|save this|keep in mind)", tl):
-                fact = re.sub(r"^(remember|note that|don't forget|save this|keep in mind)\s+", "", tl)
-                return tools.remember(fact)
-
-            # ── Recall ────────────────────────────────────────────────────
-            if any(w in tl for w in ["what do you remember","recall","show memory",
-                                      "what do you know","my memories"]):
-                topic = re.sub(r"\b(what do you remember|recall|show memory|"
-                               r"what do you know about|my memories)\b", "", tl).strip()
-                return tools.recall(topic)
-
-            # ── Forget ────────────────────────────────────────────────────
-            if any(w in tl for w in ["forget everything","clear memory","delete memory"]):
-                return tools.forget_all()
-
-            # ── Run Python script ─────────────────────────────────────────
-            m = re.search(r"run\s+([\w\-]+\.py)", tl)
-            if m:
-                return tools.run_python_script(m.group(1))
-
-        except ImportError:
-            # server.py not found — fall back to direct cmd execution
-            cmd = self._extract_cmd(tl, text)
-            if cmd:
-                return self._run_direct(cmd)
-        except Exception as e:
-            return f"Tool error: {e}"
+        # 7. Command tool (pip, git, ipconfig, dir, run script, system info, tasklist, raw terminal command)
+        res = self.cmd_tool.run(text)
+        if res:
+            return res
 
         return ""
+
 
     def _extract_cmd(self, tl: str, original: str) -> str:
         """Convert natural language to shell command."""
